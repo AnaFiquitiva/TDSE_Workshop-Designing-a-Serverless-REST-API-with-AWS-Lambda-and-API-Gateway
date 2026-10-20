@@ -22,7 +22,7 @@
     </properties>
 
     <dependencies>
-        <!-- Only the proxy adapter (lambda.proxy) uses these two. The domain package must not. -->
+        <!-- Solo las usa el adaptador proxy (lambda.proxy), nunca el dominio. -->
         <dependency>
             <groupId>com.amazonaws</groupId>
             <artifactId>aws-lambda-java-core</artifactId>
@@ -34,7 +34,7 @@
             <version>${aws-lambda-events.version}</version>
         </dependency>
 
-        <!-- JSON (de)serialization of HTTP bodies in the proxy adapter -->
+        <!-- JSON de los bodies HTTP en el adaptador proxy -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
@@ -56,7 +56,7 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
             </plugin>
-            <!-- Lambda needs a single "uber" JAR containing our classes plus all runtime dependencies -->
+            <!-- Lambda necesita un único JAR con nuestras clases y todas las dependencias -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>

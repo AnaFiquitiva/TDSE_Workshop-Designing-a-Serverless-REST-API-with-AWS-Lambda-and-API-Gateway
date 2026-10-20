@@ -5,13 +5,7 @@ import java.util.Locale;
 import java.util.UUID;
 import java.util.function.Supplier;
 
-/**
- * Application logic of the Order Management API.
- *
- * <p>Plain Java: no HTTP, no API Gateway, no Lambda types. Failures are reported with
- * {@link OrderNotFoundException} and {@link ValidationException}; it is up to each adapter to
- * decide what those mean in its own protocol.
- */
+/** Lógica de negocio de pedidos. Java puro: sin HTTP, API Gateway ni Lambda. */
 public class OrderService {
 
     private final OrderRepository repository;
@@ -47,12 +41,12 @@ public class OrderService {
         return repository.findById(orderId).orElseThrow(() -> new OrderNotFoundException(orderId));
     }
 
-    /** Returns the customer's orders, or an empty list if the customer has none. */
+    /** Pedidos del cliente; lista vacía si no tiene. */
     public List<Order> getOrdersByCustomer(String customerId) {
         return repository.findByCustomerId(requireText(customerId, "customerId"));
     }
 
-    /** Deletes the order; fails with {@link OrderNotFoundException} if it does not exist. */
+    /** Elimina el pedido; lanza OrderNotFoundException si no existe. */
     public void deleteOrder(String id) {
         String orderId = requireText(id, "id");
         if (!repository.deleteById(orderId)) {
@@ -67,10 +61,7 @@ public class OrderService {
         return value.trim();
     }
 
-    /**
-     * Random ids instead of a counter: each Lambda execution environment has its own memory, so a
-     * counter starting at 1 in every environment would hand out duplicate ids.
-     */
+    /** Id aleatorio: un contador se repetiría entre instancias de Lambda. */
     private static String randomId() {
         return "ORD-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
     }

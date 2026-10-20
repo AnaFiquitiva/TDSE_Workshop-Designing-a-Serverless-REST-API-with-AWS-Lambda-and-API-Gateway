@@ -1,12 +1,6 @@
 package edu.eci.tdse.orders.domain;
 
-/**
- * Data needed to create an order. The id is never supplied by the caller; the service assigns it.
- *
- * <p>Mutable JavaBean with a no-arg constructor and setters so that both the Lambda runtime
- * serializer (Architecture A) and Jackson (Architecture B) can build it from JSON. {@code quantity}
- * is an {@link Integer} so that a missing value ({@code null}) can be told apart from {@code 0}.
- */
+/** Datos para crear un pedido (el id lo asigna el servicio). Quantity es Integer para detectar null. */
 public class CreateOrderRequest {
 
     private String customerId;

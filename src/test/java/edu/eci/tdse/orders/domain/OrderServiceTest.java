@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-/** Plain-Java tests: no AWS, no HTTP, no web server. */
+/** Pruebas en Java puro: sin AWS, sin HTTP, sin servidor. */
 class OrderServiceTest {
 
     private OrderService service;

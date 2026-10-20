@@ -1,6 +1,6 @@
 package edu.eci.tdse.orders.lambda.direct;
 
-/** JSON built by the GET /orders?customerId=... mapping template: {@code {"customerId": "CUST-42"}}. */
+/** Entrada de GET /orders?customerId=...: {"customerId": "CUST-42"}. */
 public class CustomerQueryInput {
 
     private String customerId;

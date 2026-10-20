@@ -9,11 +9,7 @@ import java.util.List;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
-/**
- * Guards the main architectural rule of the workshop: the domain package is ordinary Java and does
- * not know about AWS, API Gateway or HTTP. Same for the direct (non-proxy) handlers, which rely on
- * the Lambda runtime to do all JSON conversion.
- */
+/** Verifica que domain/ y lambda/direct/ no dependan de AWS, HTTP ni frameworks. */
 class ArchitectureTest {
 
     private static final List<String> FORBIDDEN = List.of(

@@ -19,7 +19,7 @@ import java.util.Base64;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-/** Architecture B: the HTTP adapter is tested locally by building proxy events by hand. */
+/** Arquitectura B: se prueba el adaptador HTTP localmente con eventos proxy armados a mano. */
 class OrdersApiHandlerTest {
 
     private static final ObjectMapper JSON = new ObjectMapper()
@@ -27,7 +27,7 @@ class OrdersApiHandlerTest {
 
     private final OrdersApiHandler handler = new OrdersApiHandler(OrdersApplication.createService());
 
-    // ---- happy paths -----------------------------------------------------------------------
+    // ---- casos exitosos --------------------------------------------------------------------
 
     @Test
     void getExistingOrderReturns200() throws IOException {
@@ -111,7 +111,7 @@ class OrdersApiHandlerTest {
         assertEquals(201, handle(event).getStatusCode());
     }
 
-    // ---- error paths -----------------------------------------------------------------------
+    // ---- casos de error --------------------------------------------------------------------
 
     @Test
     void missingOrderReturns404() throws IOException {
@@ -205,7 +205,7 @@ class OrdersApiHandlerTest {
         assertTrue(!response.getBody().contains("internal detail"));
     }
 
-    // ---- real event shapes (saved in events/) ----------------------------------------------
+    // ---- eventos guardados en events/ ------------------------------------------------------
 
     @Test
     void handlesSavedProxyEvents() throws IOException {
@@ -214,7 +214,7 @@ class OrdersApiHandlerTest {
         assertEquals(201, handle(loadEvent("proxy-create-order.json")).getStatusCode());
     }
 
-    // ---- helpers ---------------------------------------------------------------------------
+    // ---- utilidades ------------------------------------------------------------------------
 
     private APIGatewayProxyResponseEvent handle(APIGatewayProxyRequestEvent event) {
         return handler.handleRequest(event, null);

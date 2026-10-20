@@ -11,10 +11,7 @@ import edu.eci.tdse.orders.domain.OrderService;
 import edu.eci.tdse.orders.domain.OrdersApplication;
 import org.junit.jupiter.api.Test;
 
-/**
- * Architecture A handlers. The error messages asserted here are the contract with the API Gateway
- * integration-response selection patterns (e.g. {@code ORDER_NOT_FOUND:.*}).
- */
+/** Handlers de la arquitectura A. Los mensajes de error deben coincidir con las regex de API Gateway. */
 class DirectOrderHandlersTest {
 
     private final DirectOrderHandlers handlers = new DirectOrderHandlers(OrdersApplication.createService());

@@ -21,13 +21,8 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Architecture B: a single Lambda behind API Gateway <em>proxy</em> integration.
- *
- * <p>This is the HTTP adapter. It is the only class that knows about API Gateway events, routes,
- * path/query parameters, headers, status codes and JSON bodies. It translates an HTTP request
- * into a call to {@link OrderService} and the result (or exception) back into an HTTP response.
- *
- * <p>Lambda handler: {@code edu.eci.tdse.orders.lambda.proxy.OrdersApiHandler::handleRequest}.
+ * Arquitectura B (integración proxy): adaptador HTTP. Es la única clase que conoce rutas,
+ * parámetros, headers y códigos de estado; delega la lógica a OrderService.
  */
 public class OrdersApiHandler
         implements RequestHandler<APIGatewayProxyRequestEvent, APIGatewayProxyResponseEvent> {
@@ -43,14 +38,14 @@ public class OrdersApiHandler
     private static final OrderService DEFAULT_SERVICE = OrdersApplication.createService();
 
     private static final ObjectMapper JSON = new ObjectMapper()
-            // Tolerant reader: extra fields (e.g. a client-supplied "id") are ignored.
+            // Ignora campos extra (ej. un "id" enviado por el cliente).
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-            // Without this, "quantity": 1.9 would silently become 1.
+            // Evita que "quantity": 1.9 se convierta en 1.
             .configure(DeserializationFeature.ACCEPT_FLOAT_AS_INT, false);
 
     private final OrderService service;
 
-    /** Used by the Lambda runtime. */
+    /** Usado por el runtime de Lambda. */
     public OrdersApiHandler() {
         this(DEFAULT_SERVICE);
     }
@@ -69,7 +64,7 @@ public class OrdersApiHandler
         } catch (InvalidBodyException e) {
             return error(400, INVALID_REQUEST_BODY, e.getMessage());
         } catch (RuntimeException e) {
-            // Unexpected: keep the stack trace in CloudWatch, return a generic message to the client.
+            // Error inesperado: detalle en CloudWatch, mensaje genérico al cliente.
             log(context, "Unexpected error: " + e);
             e.printStackTrace();
             return error(500, INTERNAL_ERROR, "Unexpected internal error");
@@ -104,7 +99,7 @@ public class OrdersApiHandler
         return error(404, ROUTE_NOT_FOUND, "No route for " + method + " " + event.getPath());
     }
 
-    // ---- request side ----------------------------------------------------------------------
+    // ---- petición --------------------------------------------------------------------------
 
     private static String pathParam(APIGatewayProxyRequestEvent event, String name) {
         Map<String, String> params = event.getPathParameters();
@@ -132,7 +127,7 @@ public class OrdersApiHandler
         }
     }
 
-    // ---- response side ---------------------------------------------------------------------
+    // ---- respuesta -------------------------------------------------------------------------
 
     private static int statusFor(OrderException e) {
         if (e instanceof OrderNotFoundException) {
@@ -154,7 +149,7 @@ public class OrdersApiHandler
         return response(201, order, headers);
     }
 
-    /** 204 must not carry a body (and therefore no Content-Type either). */
+    /** 204 va sin body ni Content-Type. */
     private static APIGatewayProxyResponseEvent noContent() {
         return response(204, null, new HashMap<>());
     }
@@ -194,9 +189,9 @@ public class OrdersApiHandler
         }
     }
 
-    // ---- diagnostics -----------------------------------------------------------------------
+    // ---- diagnóstico -----------------------------------------------------------------------
 
-    /** Set the LOG_EVENTS=true environment variable to print the raw proxy event to CloudWatch. */
+    /** Con LOG_EVENTS=true imprime el evento completo en CloudWatch. */
     private static void logEventIfEnabled(APIGatewayProxyRequestEvent event, Context context) {
         if ("true".equalsIgnoreCase(System.getenv("LOG_EVENTS"))) {
             try {
@@ -215,7 +210,7 @@ public class OrdersApiHandler
         }
     }
 
-    /** Malformed HTTP body: an HTTP-level problem, so it stays inside the adapter. */
+    /** Body HTTP mal formado (problema HTTP, por eso vive en el adaptador). */
     private static final class InvalidBodyException extends RuntimeException {
         InvalidBodyException(String message) {
             super(message);

@@ -1,11 +1,6 @@
 package edu.eci.tdse.orders.domain;
 
-/**
- * Composition root: builds the {@link OrderService} the Lambda handlers use.
- *
- * <p>The repository starts with predefined orders, so GET requests return data even right after a
- * cold start (when everything created by earlier POSTs has been lost).
- */
+/** Construye el OrderService con pedidos de ejemplo precargados. */
 public final class OrdersApplication {
 
     private OrdersApplication() {

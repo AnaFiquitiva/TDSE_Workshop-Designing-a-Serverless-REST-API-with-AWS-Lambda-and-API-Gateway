@@ -1,12 +1,6 @@
 package edu.eci.tdse.orders.domain;
 
-/**
- * Base class for expected business failures.
- *
- * <p>Each failure carries a stable, machine-readable {@code code} (e.g. {@code ORDER_NOT_FOUND}).
- * The code describes <em>what</em> went wrong in business terms; translating it into an HTTP
- * status code is the job of the adapters, not of the domain.
- */
+/** Error de negocio con un código (ej. ORDER_NOT_FOUND). Los adaptadores lo traducen a HTTP. */
 public abstract class OrderException extends RuntimeException {
 
     private final String code;

@@ -1,6 +1,6 @@
 package edu.eci.tdse.orders.lambda.proxy;
 
-/** JSON body of every error response: {@code {"error": "ORDER_NOT_FOUND", "message": "..."}}. */
+/** Cuerpo de error: {"error": "ORDER_NOT_FOUND", "message": "..."}. */
 public class ErrorResponse {
 
     private final String error;

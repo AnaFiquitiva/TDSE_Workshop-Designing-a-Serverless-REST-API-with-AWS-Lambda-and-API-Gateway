@@ -2,13 +2,7 @@ package edu.eci.tdse.orders.domain;
 
 import java.util.Objects;
 
-/**
- * An order placed by a customer.
- *
- * <p>Immutable value object. It is a classic class with getters (not a record) on purpose: the
- * AWS Lambda Java runtime serializes return values through JavaBean getters, so {@code getId()} is
- * the safest accessor style to expose as JSON.
- */
+/** Pedido de un cliente. Inmutable; usa getters (no record) porque Lambda serializa con getters. */
 public final class Order {
 
     private final String id;

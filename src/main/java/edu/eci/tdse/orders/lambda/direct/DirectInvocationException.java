@@ -1,11 +1,6 @@
 package edu.eci.tdse.orders.lambda.direct;
 
-/**
- * Thrown out of a direct (non-proxy) handler so that API Gateway can map it to an HTTP status.
- *
- * <p>The message format {@code "<CODE>: <human message>"} is a contract with the integration
- * response selection patterns in {@code infrastructure/openapi-mapping.yaml}.
- */
+/** Error con mensaje "CODIGO: texto"; debe coincidir con las regex de template.yaml. */
 public class DirectInvocationException extends RuntimeException {
 
     public static final String INTERNAL_ERROR = "INTERNAL_ERROR";

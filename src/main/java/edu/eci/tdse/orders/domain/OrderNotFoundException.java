@@ -1,6 +1,6 @@
 package edu.eci.tdse.orders.domain;
 
-/** The requested order does not exist. */
+/** El pedido solicitado no existe. */
 public class OrderNotFoundException extends OrderException {
 
     public static final String CODE = "ORDER_NOT_FOUND";
