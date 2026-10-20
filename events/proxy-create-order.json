@@ -1,0 +1,27 @@
+{
+  "resource": "/orders",
+  "path": "/orders",
+  "httpMethod": "POST",
+  "headers": {
+    "Content-Type": "application/json",
+    "Host": "abc123xyz.execute-api.us-east-1.amazonaws.com"
+  },
+  "multiValueHeaders": {
+    "Content-Type": ["application/json"],
+    "Host": ["abc123xyz.execute-api.us-east-1.amazonaws.com"]
+  },
+  "queryStringParameters": null,
+  "multiValueQueryStringParameters": null,
+  "pathParameters": null,
+  "stageVariables": null,
+  "requestContext": {
+    "resourcePath": "/orders",
+    "httpMethod": "POST",
+    "path": "/prod/orders",
+    "stage": "prod",
+    "requestId": "e8c01ce8-7b61-11e6-9a41-93e8deadbeef",
+    "apiId": "abc123xyz"
+  },
+  "body": "{\"customerId\":\"CUST-42\",\"product\":\"MacBook Air\",\"quantity\":1}",
+  "isBase64Encoded": false
+}

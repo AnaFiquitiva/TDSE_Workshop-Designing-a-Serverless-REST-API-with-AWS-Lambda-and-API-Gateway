@@ -1,0 +1,290 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Orders API. Two REST APIs backed by the same JAR:
+  (A) non-proxy integration with mapping templates, one Lambda per operation;
+  (B) Lambda proxy integration, one Lambda with a thin HTTP adapter.
+
+Globals:
+  Function:
+    Runtime: java17
+    CodeUri: target/orders-api-1.0.0.jar
+    MemorySize: 512
+    Timeout: 15
+
+Resources:
+
+  # ============================================================================
+  # Architecture A - API Gateway mapping templates (non-proxy / "AWS" integration)
+  # ============================================================================
+
+  CreateOrderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: orders-a-create-order
+      Handler: edu.eci.tdse.orders.lambda.direct.DirectOrderHandlers::createOrder
+
+  GetOrderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: orders-a-get-order
+      Handler: edu.eci.tdse.orders.lambda.direct.DirectOrderHandlers::getOrder
+
+  FindOrdersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: orders-a-find-orders
+      Handler: edu.eci.tdse.orders.lambda.direct.DirectOrderHandlers::getOrdersByCustomer
+
+  # SAM only adds invoke permissions for "Events"; with a hand-written DefinitionBody we add them.
+  CreateOrderPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref CreateOrderFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MappedApi}/*
+  GetOrderPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetOrderFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MappedApi}/*
+  FindOrdersPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref FindOrdersFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MappedApi}/*
+
+  MappedApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: orders-api-mapping
+      StageName: prod
+      DefinitionBody:
+        swagger: '2.0'
+        info:
+          title: orders-api-mapping
+          version: '1.0'
+        consumes: [application/json]
+        produces: [application/json]
+
+        x-amazon-apigateway-request-validators:
+          body:
+            validateRequestBody: true
+            validateRequestParameters: false
+          params:
+            validateRequestBody: false
+            validateRequestParameters: true
+
+        # Errors produced by API Gateway itself (before Lambda runs) use the same JSON shape.
+        x-amazon-apigateway-gateway-responses:
+          BAD_REQUEST_BODY:
+            statusCode: 400
+            responseTemplates:
+              application/json: '{"error": "VALIDATION_ERROR", "message": $context.error.messageString}'
+          BAD_REQUEST_PARAMETERS:
+            statusCode: 400
+            responseTemplates:
+              application/json: '{"error": "VALIDATION_ERROR", "message": $context.error.messageString}'
+          MISSING_AUTHENTICATION_TOKEN:   # what API Gateway returns for an unknown route
+            statusCode: 404
+            responseTemplates:
+              application/json: '{"error": "ROUTE_NOT_FOUND", "message": "No such resource or method"}'
+          DEFAULT_5XX:
+            responseTemplates:
+              application/json: '{"error": "INTERNAL_ERROR", "message": $context.error.messageString}'
+
+        definitions:
+          # Structural validation only (required fields and types). Business rules such as
+          # "quantity > 0" stay in Java so that both architectures enforce them.
+          CreateOrderRequest:
+            type: object
+            required: [customerId, product, quantity]
+            properties:
+              customerId: {type: string}
+              product: {type: string}
+              quantity: {type: integer}
+          Order:
+            type: object
+            properties:
+              id: {type: string}
+              customerId: {type: string}
+              product: {type: string}
+              quantity: {type: integer}
+          Error:
+            type: object
+            properties:
+              error: {type: string}
+              message: {type: string}
+
+        paths:
+          /orders:
+            post:
+              parameters:
+                - in: body
+                  name: CreateOrderRequest
+                  required: true
+                  schema: {$ref: '#/definitions/CreateOrderRequest'}
+              x-amazon-apigateway-request-validator: body
+              responses:
+                '201':
+                  description: Created
+                  headers:
+                    Location: {type: string}
+                  schema: {$ref: '#/definitions/Order'}
+                '400': {description: Bad Request, schema: {$ref: '#/definitions/Error'}}
+                '500': {description: Internal Server Error, schema: {$ref: '#/definitions/Error'}}
+              x-amazon-apigateway-integration:
+                type: aws
+                httpMethod: POST
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateOrderFunction.Arn}/invocations
+                passthroughBehavior: never
+                requestTemplates:
+                  application/json: |
+                    $input.json('$')
+                responses:
+                  default:
+                    statusCode: '201'
+                    responseTemplates:
+                      application/json: |
+                        #set($context.responseOverride.header.Location = "/orders/$input.path('$.id')")
+                        $input.json('$')
+                  'VALIDATION_ERROR:.*':
+                    statusCode: '400'
+                    responseTemplates:
+                      application/json: |
+                        #set($raw = $input.path('$.errorMessage'))
+                        #set($start = $raw.indexOf(': ') + 2)
+                        {"error": "VALIDATION_ERROR", "message": "$util.escapeJavaScript($raw.substring($start))"}
+                  'INTERNAL_ERROR:.*':
+                    statusCode: '500'
+                    responseTemplates:
+                      application/json: |
+                        {"error": "INTERNAL_ERROR", "message": "Unexpected internal error"}
+
+            get:
+              parameters:
+                - {in: query, name: customerId, required: true, type: string}
+              x-amazon-apigateway-request-validator: params
+              responses:
+                '200': {description: OK}
+                '400': {description: Bad Request, schema: {$ref: '#/definitions/Error'}}
+                '500': {description: Internal Server Error, schema: {$ref: '#/definitions/Error'}}
+              x-amazon-apigateway-integration:
+                type: aws
+                httpMethod: POST
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FindOrdersFunction.Arn}/invocations
+                passthroughBehavior: when_no_templates
+                requestTemplates:
+                  application/json: |
+                    {"customerId": "$util.escapeJavaScript($input.params('customerId'))"}
+                responses:
+                  default:
+                    statusCode: '200'
+                  'VALIDATION_ERROR:.*':
+                    statusCode: '400'
+                    responseTemplates:
+                      application/json: |
+                        #set($raw = $input.path('$.errorMessage'))
+                        #set($start = $raw.indexOf(': ') + 2)
+                        {"error": "VALIDATION_ERROR", "message": "$util.escapeJavaScript($raw.substring($start))"}
+                  'INTERNAL_ERROR:.*':
+                    statusCode: '500'
+                    responseTemplates:
+                      application/json: |
+                        {"error": "INTERNAL_ERROR", "message": "Unexpected internal error"}
+
+          /orders/{id}:
+            get:
+              parameters:
+                - {in: path, name: id, required: true, type: string}
+              responses:
+                '200': {description: OK, schema: {$ref: '#/definitions/Order'}}
+                '400': {description: Bad Request, schema: {$ref: '#/definitions/Error'}}
+                '404': {description: Not Found, schema: {$ref: '#/definitions/Error'}}
+                '500': {description: Internal Server Error, schema: {$ref: '#/definitions/Error'}}
+              x-amazon-apigateway-integration:
+                type: aws
+                httpMethod: POST
+                uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetOrderFunction.Arn}/invocations
+                passthroughBehavior: when_no_templates
+                requestTemplates:
+                  application/json: |
+                    {"id": "$util.escapeJavaScript($input.params('id'))"}
+                responses:
+                  default:
+                    statusCode: '200'
+                  'ORDER_NOT_FOUND:.*':
+                    statusCode: '404'
+                    responseTemplates:
+                      application/json: |
+                        #set($raw = $input.path('$.errorMessage'))
+                        #set($start = $raw.indexOf(': ') + 2)
+                        {"error": "ORDER_NOT_FOUND", "message": "$util.escapeJavaScript($raw.substring($start))"}
+                  'VALIDATION_ERROR:.*':
+                    statusCode: '400'
+                    responseTemplates:
+                      application/json: |
+                        #set($raw = $input.path('$.errorMessage'))
+                        #set($start = $raw.indexOf(': ') + 2)
+                        {"error": "VALIDATION_ERROR", "message": "$util.escapeJavaScript($raw.substring($start))"}
+                  'INTERNAL_ERROR:.*':
+                    statusCode: '500'
+                    responseTemplates:
+                      application/json: |
+                        {"error": "INTERNAL_ERROR", "message": "Unexpected internal error"}
+
+  # ============================================================================
+  # Architecture B - Lambda proxy integration, one function + HTTP adapter
+  # ============================================================================
+
+  OrdersProxyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: orders-b-proxy
+      Handler: edu.eci.tdse.orders.lambda.proxy.OrdersApiHandler::handleRequest
+      Environment:
+        Variables:
+          LOG_EVENTS: 'false'   # set to 'true' to print the raw proxy event in CloudWatch
+      Events:
+        CreateOrder:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProxyApi
+            Path: /orders
+            Method: POST
+        FindOrders:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProxyApi
+            Path: /orders
+            Method: GET
+        GetOrder:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProxyApi
+            Path: /orders/{id}
+            Method: GET
+
+  ProxyApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: orders-api-proxy
+      StageName: prod
+      GatewayResponses:
+        MISSING_AUTHENTICATION_TOKEN:
+          StatusCode: 404
+          ResponseTemplates:
+            application/json: '{"error": "ROUTE_NOT_FOUND", "message": "No such resource or method"}'
+
+Outputs:
+  MappedApiUrl:
+    Description: Architecture A (mapping templates) base URL
+    Value: !Sub https://${MappedApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+  ProxyApiUrl:
+    Description: Architecture B (proxy integration) base URL
+    Value: !Sub https://${ProxyApi}.execute-api.${AWS::Region}.amazonaws.com/prod
