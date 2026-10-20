@@ -94,6 +94,30 @@ curl -i "$API/orders"
 # A → {"error":"VALIDATION_ERROR","message":"Missing required request parameters: [customerId]"}
 ```
 
+## 204 No Content / 404 — `DELETE /orders/{id}` (Architecture B)
+
+```bash
+curl -i -X DELETE "$API/orders/ORD-42"
+```
+
+```http
+HTTP/2 204
+```
+
+```bash
+curl -i -X DELETE "$API/orders/ORD-42"   # again
+curl -i -X DELETE "$API/orders/ORD-999"
+```
+
+```http
+HTTP/2 404
+
+{"error":"ORDER_NOT_FOUND","message":"Order ORD-42 does not exist"}
+```
+
+Remember that the store is in memory. A cold start brings `ORD-42` back, because the seed data
+is reloaded.
+
 ## 405 / unknown route (Architecture B)
 
 ```bash

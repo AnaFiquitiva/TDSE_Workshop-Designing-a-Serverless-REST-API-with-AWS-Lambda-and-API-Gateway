@@ -21,3 +21,29 @@ Expected behavior: `DELETE /orders/ORD-42` → `204 No Content` (empty body);
 Open question to check: should a second DELETE of the same order return 404 or 204? DELETE is
 *idempotent* in terms of server **state** (the order is gone either way), not in terms of the
 response code. The workshop's contract says nonexistent → 404, so the second call returns 404.
+
+---
+
+## Outcome (added after implementing)
+
+What the change actually touched:
+
+| File | Change | Predicted? |
+|---|---|---|
+| `domain/OrderRepository.java` | `boolean deleteById(String id)` | ✔ (name differs) |
+| `domain/InMemoryOrderRepository.java` | `orders.remove(id) != null` | ✔ |
+| `domain/OrderService.java` | `deleteOrder(id)`: validates id, throws `OrderNotFoundException` when nothing was removed | ✔ |
+| `lambda/proxy/OrdersApiHandler.java` | `case "DELETE"` → `noContent()`; `Allow: GET, DELETE` | ✔ |
+| `lambda/proxy/OrdersApiHandler.java` | new `noContent()` helper: a 204 must have **no body and no `Content-Type`**, so the usual `jsonHeaders()` could not be reused | ✘ not predicted |
+| `template.yaml` | one `DeleteOrder` event (`DELETE /orders/{id}`) on the same function | ✔ |
+| Tests | +5 in `OrderServiceTest`, +4 in `OrdersApiHandlerTest` (204 + empty body, GET afterwards 404, missing 404, twice → 204 then 404, `Allow` header) | ✔ |
+| `Order`, `CreateOrderRequest`, exceptions, `DirectOrderHandlers` | unchanged | ✔ |
+
+**Agent's proposal vs. the prediction:** they matched on every structural point: no new
+Lambda, one new API Gateway method, logic in the service, and the 204/404 decision in the adapter.
+That is expected, because the prediction was drafted with the same agent. The useful lesson is
+how *small* the change was in Architecture B: three lines in the domain, five in the adapter, one
+route in the gateway, and **no new error handling**. The 404 came for free from the existing
+`OrderNotFoundException` → 404 mapping. The same feature in Architecture A would have needed a new
+Lambda, a new handler method, a mapping template, a method response for 204, and integration
+responses for 404, 400 and 500.

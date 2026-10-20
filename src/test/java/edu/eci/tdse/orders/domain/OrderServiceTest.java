@@ -99,6 +99,46 @@ class OrderServiceTest {
     }
 
     @Test
+    void deletesExistingOrder() {
+        Order order = service.createOrder(new CreateOrderRequest("CUST-42", "MacBook Air", 1));
+
+        service.deleteOrder(order.getId());
+
+        assertThrows(OrderNotFoundException.class, () -> service.getOrder(order.getId()));
+    }
+
+    @Test
+    void deletingOneOrderKeepsTheCustomersOtherOrders() {
+        Order first = service.createOrder(new CreateOrderRequest("CUST-42", "MacBook Air", 1));
+        Order second = service.createOrder(new CreateOrderRequest("CUST-42", "Mouse", 3));
+
+        service.deleteOrder(first.getId());
+
+        assertEquals(List.of(second), service.getOrdersByCustomer("CUST-42"));
+    }
+
+    @Test
+    void deletingMissingOrderFails() {
+        OrderNotFoundException e = assertThrows(OrderNotFoundException.class,
+                () -> service.deleteOrder("ORD-999"));
+
+        assertEquals("Order ORD-999 does not exist", e.getMessage());
+    }
+
+    @Test
+    void deletingTwiceFailsTheSecondTime() {
+        Order order = service.createOrder(new CreateOrderRequest("CUST-42", "MacBook Air", 1));
+        service.deleteOrder(order.getId());
+
+        assertThrows(OrderNotFoundException.class, () -> service.deleteOrder(order.getId()));
+    }
+
+    @Test
+    void deletingWithBlankIdIsValidationError() {
+        assertThrows(ValidationException.class, () -> service.deleteOrder("  "));
+    }
+
+    @Test
     void defaultIdGeneratorProducesDistinctIds() {
         OrderService realIds = new OrderService(new InMemoryOrderRepository());
         Order a = realIds.createOrder(new CreateOrderRequest("CUST-1", "A", 1));

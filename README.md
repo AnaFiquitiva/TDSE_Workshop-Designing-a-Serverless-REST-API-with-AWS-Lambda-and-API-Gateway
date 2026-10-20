@@ -13,6 +13,7 @@ in two architectures that share the same plain-Java application logic:
 | Create an order | `POST /orders` | `201 Created` + `Location` |
 | Retrieve an order | `GET /orders/{id}` | `200 OK` |
 | Find a customer's orders | `GET /orders?customerId={customerId}` | `200 OK` |
+| Delete an order *(final challenge, Architecture B)* | `DELETE /orders/{id}` | `204 No Content` |
 
 ---
 
@@ -29,7 +30,8 @@ in two architectures that share the same plain-Java application logic:
 9. [Unexpected internal errors](#9-unexpected-internal-errors)
 10. [Final architecture](#10-final-architecture)
 11. [AI-assisted development — criticizing the agent](#11-ai-assisted-development--criticizing-the-agent)
-12. [Demonstration checklist](#12-demonstration-checklist)
+12. [Final challenge — DELETE](#12-final-challenge--delete)
+13. [Demonstration checklist](#13-demonstration-checklist)
 
 Other documents:
 
@@ -67,7 +69,7 @@ Deploying is covered in [`docs/aws-setup.md`](docs/aws-setup.md). The short vers
     │   ├── domain/                   # ── ordinary Java, no AWS, no HTTP ──
     │   │   ├── Order.java
     │   │   ├── CreateOrderRequest.java
-    │   │   ├── OrderService.java     # create / get / find by customer
+    │   │   ├── OrderService.java     # create / get / find by customer / delete
     │   │   ├── OrderRepository.java  # storage port
     │   │   ├── InMemoryOrderRepository.java
     │   │   ├── OrdersApplication.java# wiring + seed data
@@ -121,13 +123,13 @@ already carries it.
 
 ### Operations
 
-| | `POST /orders` | `GET /orders/{id}` | `GET /orders?customerId=` |
-|---|---|---|---|
-| Path params | – | `id` (order id) | – |
-| Query params | – | – | `customerId` (**required**) |
-| Request body | `{"customerId","product","quantity"}` | – | – |
-| Success | **201** + `Location: /orders/{newId}` + created `Order` | **200** + `Order` | **200** + `Order[]` (possibly `[]`) |
-| Errors | 400 `VALIDATION_ERROR` / `INVALID_REQUEST_BODY`, 500 | 400 (blank id), 404 `ORDER_NOT_FOUND`, 500 | 400 (missing `customerId`), 500 |
+| | `POST /orders` | `GET /orders/{id}` | `GET /orders?customerId=` | `DELETE /orders/{id}` |
+|---|---|---|---|---|
+| Path params | – | `id` (order id) | – | `id` |
+| Query params | – | – | `customerId` (**required**) | – |
+| Request body | `{"customerId","product","quantity"}` | – | – | – |
+| Success | **201** + `Location: /orders/{newId}` + created `Order` | **200** + `Order` | **200** + `Order[]` (possibly `[]`) | **204**, empty body |
+| Errors | 400 `VALIDATION_ERROR` / `INVALID_REQUEST_BODY`, 500 | 400 (blank id), 404 `ORDER_NOT_FOUND`, 500 | 400 (missing `customerId`), 500 | 404 `ORDER_NOT_FOUND`, 500 |
 
 Validation rules: `customerId` and `product` are required and must be non-blank, `quantity` is
 a required integer ≥ 1. The `id` is always assigned by the server, so an `id` in the POST body is
@@ -397,10 +399,12 @@ flowchart LR
     R -->|"POST /orders"| P["parse body → CreateOrderRequest"] --> S1["service.createOrder"]
     R -->|"GET /orders"| Q["queryStringParameters.customerId"] --> S2["service.getOrdersByCustomer"]
     R -->|"GET /orders/{id}"| PP["pathParameters.id"] --> S3["service.getOrder"]
+    R -->|"DELETE /orders/{id}"| PD["pathParameters.id"] --> S4["service.deleteOrder"]
     S1 & S2 & S3 --> OK["200 / 201 + Location"]
-    S1 & S2 & S3 -.->|"OrderNotFoundException"| N["404"]
-    S1 & S2 & S3 -.->|"ValidationException"| B["400"]
-    S1 & S2 & S3 -.->|"anything else"| I["500 (logged)"]
+    S4 --> NC["204 (no body)"]
+    S1 & S2 & S3 & S4 -.->|"OrderNotFoundException"| N["404"]
+    S1 & S2 & S3 & S4 -.->|"ValidationException"| B["400"]
+    S1 & S2 & S3 & S4 -.->|"anything else"| I["500 (logged)"]
 ```
 
 * The handler knows about the event, routing, path/query parameters, JSON parsing of the body,
@@ -412,7 +416,7 @@ flowchart LR
 the URL of the resource it just created. A relative URL is used because the handler cannot know
 the stage or custom domain the client called through.
 
-All of B's behaviour is unit tested locally (`OrdersApiHandlerTest`, 16 tests). The tests build
+All of B's behaviour is unit tested locally (`OrdersApiHandlerTest`, 20 tests). The tests build
 events by hand and also load the saved `events/proxy-*.json`.
 
 ---
@@ -453,7 +457,7 @@ flowchart LR
 
     subgraph AWS["AWS — managed services and AWS-specific code"]
         direction LR
-        APIGW["Amazon API Gateway<br/>REST API orders-api-proxy<br/>routes: POST /orders, GET /orders,<br/>GET /orders/{id}<br/>(Lambda proxy integration)"]
+        APIGW["Amazon API Gateway<br/>REST API orders-api-proxy<br/>routes: POST /orders, GET /orders,<br/>GET /orders/{id}, DELETE /orders/{id}<br/>(Lambda proxy integration)"]
         subgraph LAMBDA["AWS Lambda: orders-b-proxy (Java 17)"]
             direction TB
             H["HTTP adapter<br/>OrdersApiHandler<br/>depends on aws-lambda-java-events, Jackson"]
@@ -568,13 +572,29 @@ architecture before writing code. The non-trivial decisions it made are analyzed
 
 ---
 
-## 12. Demonstration checklist
+## 12. Final challenge — DELETE
+
+The prediction was committed **before** the implementation, in its own commit:
+[`docs/delete-prediction.md`](docs/delete-prediction.md). The same file has an "Outcome"
+section that compares the prediction with what changed.
+
+In summary, DELETE was added only to Architecture B, the final API. It needed **no new Lambda**,
+one new API Gateway method (`DeleteOrder` event in `template.yaml`), `OrderService.deleteOrder`
+plus `OrderRepository.deleteById` for the logic, and one `case "DELETE"` in the adapter that
+returns 204. The 404 for a missing order reuses the existing `OrderNotFoundException` → 404
+mapping, so no new error handling was written. A second DELETE of the same order returns 404,
+because DELETE is idempotent in server *state*, not in response code.
+
+---
+
+## 13. Demonstration checklist
 
 Video: *(add link)*
 
-1. `mvn test`: 38 tests, all green.
+1. `mvn test`: 47 tests, all green.
 2. `mvn package`: show `target/orders-api-1.0.0.jar`.
 3. Invoke a Lambda directly: console *Test* with `events/direct-create-order.json` (or `aws lambda invoke`).
 4. Call the deployed API (commands in [`docs/examples.md`](docs/examples.md)):
    successful POST (201 + `Location`), successful GET (200), 404 (`ORD-999`), 400 (`quantity: 0`).
-5. Show the architecture diagram (§10).
+5. DELETE: `DELETE /orders/ORD-42` → 204, again → 404, `GET /orders/ORD-42` → 404.
+6. Show the architecture diagram (§10).

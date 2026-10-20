@@ -79,6 +79,30 @@ class OrdersApiHandlerTest {
     }
 
     @Test
+    void deleteExistingOrderReturns204WithoutBodyAndOrderIsGone() throws IOException {
+        APIGatewayProxyResponseEvent deleted = handle(delete("ORD-42"));
+
+        assertEquals(204, deleted.getStatusCode());
+        assertEquals(null, deleted.getBody());
+        assertEquals(null, deleted.getHeaders().get("Content-Type"));
+
+        APIGatewayProxyResponseEvent fetched = handle(get("/orders/{id}", "/orders/ORD-42")
+                .withPathParameters(Map.of("id", "ORD-42")));
+        assertError(fetched, 404, "ORDER_NOT_FOUND", "Order ORD-42 does not exist");
+    }
+
+    @Test
+    void deleteMissingOrderReturns404() throws IOException {
+        assertError(handle(delete("ORD-999")), 404, "ORDER_NOT_FOUND", "Order ORD-999 does not exist");
+    }
+
+    @Test
+    void deletingTwiceReturns204Then404() {
+        assertEquals(204, handle(delete("ORD-001")).getStatusCode());
+        assertEquals(404, handle(delete("ORD-001")).getStatusCode());
+    }
+
+    @Test
     void acceptsBase64EncodedBody() {
         String json = "{\"customerId\":\"CUST-1\",\"product\":\"Pen\",\"quantity\":5}";
         APIGatewayProxyRequestEvent event = post(Base64.getEncoder()
@@ -152,6 +176,16 @@ class OrdersApiHandlerTest {
     }
 
     @Test
+    void allowHeaderOnSingleOrderListsDelete() {
+        APIGatewayProxyResponseEvent response = handle(new APIGatewayProxyRequestEvent()
+                .withResource("/orders/{id}").withPath("/orders/ORD-42").withHttpMethod("PATCH")
+                .withPathParameters(Map.of("id", "ORD-42")));
+
+        assertEquals(405, response.getStatusCode());
+        assertEquals("GET, DELETE", response.getHeaders().get("Allow"));
+    }
+
+    @Test
     void unknownRouteReturns404() throws IOException {
         APIGatewayProxyResponseEvent response = handle(get("/customers", "/customers"));
 
@@ -188,6 +222,11 @@ class OrdersApiHandlerTest {
 
     private static APIGatewayProxyRequestEvent get(String resource, String path) {
         return new APIGatewayProxyRequestEvent().withHttpMethod("GET").withResource(resource).withPath(path);
+    }
+
+    private static APIGatewayProxyRequestEvent delete(String id) {
+        return new APIGatewayProxyRequestEvent().withHttpMethod("DELETE").withResource("/orders/{id}")
+                .withPath("/orders/" + id).withPathParameters(Map.of("id", id));
     }
 
     private static APIGatewayProxyRequestEvent post(String body) {

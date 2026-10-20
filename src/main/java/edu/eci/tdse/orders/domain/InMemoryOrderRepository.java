@@ -34,4 +34,9 @@ public class InMemoryOrderRepository implements OrderRepository {
                 .sorted(Comparator.comparing(Order::getId))
                 .toList();
     }
+
+    @Override
+    public boolean deleteById(String id) {
+        return orders.remove(id) != null;
+    }
 }

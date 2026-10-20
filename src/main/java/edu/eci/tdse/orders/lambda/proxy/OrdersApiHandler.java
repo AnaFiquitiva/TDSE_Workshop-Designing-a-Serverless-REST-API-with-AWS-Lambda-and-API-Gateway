@@ -94,8 +94,11 @@ public class OrdersApiHandler
             switch (method) {
                 case "GET":
                     return ok(service.getOrder(pathParam(event, "id")));
+                case "DELETE":
+                    service.deleteOrder(pathParam(event, "id"));
+                    return noContent();
                 default:
-                    return methodNotAllowed(method, "GET");
+                    return methodNotAllowed(method, "GET, DELETE");
             }
         }
         return error(404, ROUTE_NOT_FOUND, "No route for " + method + " " + event.getPath());
@@ -149,6 +152,11 @@ public class OrdersApiHandler
         Map<String, String> headers = jsonHeaders();
         headers.put("Location", ORDERS + "/" + order.getId());
         return response(201, order, headers);
+    }
+
+    /** 204 must not carry a body (and therefore no Content-Type either). */
+    private static APIGatewayProxyResponseEvent noContent() {
+        return response(204, null, new HashMap<>());
     }
 
     private static APIGatewayProxyResponseEvent methodNotAllowed(String method, String allowed) {

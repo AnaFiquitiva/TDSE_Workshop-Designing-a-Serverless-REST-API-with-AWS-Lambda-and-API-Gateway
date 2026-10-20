@@ -164,7 +164,7 @@ $input.json('$')
    Optional environment variable `LOG_EVENTS=true` to print every raw event to CloudWatch
    (that is how `events/proxy-*.json` can be captured from a real request).
 2. New REST API `orders-api-proxy`, resources `/orders` and `/orders/{id}`.
-3. Methods `POST /orders`, `GET /orders`, `GET /orders/{id}`: Lambda function `orders-b-proxy`,
+3. Methods `POST /orders`, `GET /orders`, `GET /orders/{id}`, `DELETE /orders/{id}`: Lambda function `orders-b-proxy`,
    **Lambda proxy integration ON**. Nothing else: no models, no templates, no integration responses.
 4. Optional: gateway response *Missing Authentication Token* → 404 with the `ROUTE_NOT_FOUND` body.
 5. Deploy to stage `prod`.

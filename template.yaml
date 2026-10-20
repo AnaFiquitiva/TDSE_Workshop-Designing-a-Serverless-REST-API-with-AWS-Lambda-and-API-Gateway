@@ -269,6 +269,12 @@ Resources:
             RestApiId: !Ref ProxyApi
             Path: /orders/{id}
             Method: GET
+        DeleteOrder:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ProxyApi
+            Path: /orders/{id}
+            Method: DELETE
 
   ProxyApi:
     Type: AWS::Serverless::Api
