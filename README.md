@@ -93,6 +93,7 @@ El despliegue está en [`docs/aws-setup.md`](docs/aws-setup.md). En resumen:
         ├── ArchitectureTest.java     # falla si domain/ importa AWS, Jackson, servlets, Spring…
         ├── domain/OrderServiceTest.java
         ├── lambda/direct/DirectOrderHandlersTest.java
+        ├── lambda/direct/MappingContractTest.java   # mensajes de Java vs. regex de template.yaml
         └── lambda/proxy/OrdersApiHandlerTest.java
 ```
 
@@ -443,7 +444,7 @@ Las pruebas arman los eventos a mano y también cargan los `events/proxy-*.json`
 |---|---|---|
 | **¿Cuál requirió más configuración de API Gateway?** | **A, por mucho.** Por cada método: un request template, un modelo/validador, method responses, una integration response (regex + template) por cada estado, y además las gateway responses. Unas 200 líneas de `template.yaml`. | Por cada método: "Lambda proxy, activado". Unas 15 líneas. |
 | **¿Cuál requirió más código Java de infraestructura?** | Muy poco: una clase POJO-entra/POJO-sale, dos DTOs de entrada y una excepción. Ninguna dependencia de AWS. | **B.** `OrdersApiHandler` (~200 líneas) hace enrutamiento, parseo, mapeo de estados y headers, y depende de `aws-lambda-java-events` + Jackson. |
-| **¿Cuál fue más fácil de probar localmente?** | Las partes Java sí. Los templates VTL, las regex y los validadores **no** se pueden probar con `mvn test`; hay que desplegar (o usar el botón *Test* de la consola). | **B.** Todo el comportamiento HTTP (estados, headers, bodies de error, JSON mal formado) se prueba con JUnit en milisegundos. |
+| **¿Cuál fue más fácil de probar localmente?** | Las partes Java sí. El contrato entre los mensajes de Java y las regex sí se prueba con `mvn test` (`MappingContractTest` lee `template.yaml`). Lo que **no** se puede ejecutar localmente es el motor de API Gateway: los templates VTL completos y los validadores de modelos solo se verifican desplegando (o con el botón *Test* de la consola). | **B.** Todo el comportamiento HTTP (estados, headers, bodies de error, JSON mal formado) se prueba con JUnit en milisegundos. |
 | **¿Dónde se definen los códigos de estado?** | En API Gateway: la integration response por defecto (200/201), las regex (400/404/500) y las gateway responses (validación). Java solo decide el *código* de error. | En Java, en un método (`statusFor`) más `ok`/`created` en el adaptador. API Gateway solo genera un estado para errores que ocurren antes de Lambda (ruta desconocida). |
 | **¿Qué pasa si la API crece de 3 a 30 operaciones?** | La configuración crece a unos 30 × (template + respuestas × estados). Cada código de estado nuevo hay que agregarlo en cada método. Los errores de copiar y pegar se vuelven probables, y terminas con 30 funciones que desplegar y monitorear o con un truco de despacho. | Cada operación agrega una ruta y una llamada al servicio. Un `switch` escrito a mano se vuelve incómodo a esa escala, así que pasaría a una tabla de rutas o a una librería (p. ej. `aws-serverless-java-container`, funciones de Micronaut/Quarkus), o lo dividiría en unas pocas Lambdas por contexto. |
 | **¿Cuál deja más limpia la lógica de negocio Java?** | **Igual: `domain/` es idéntico en ambas.** A tiene el *handler* más limpio (sin HTTP). | Igual. Lo HTTP queda contenido en una sola clase adaptadora. |
@@ -461,7 +462,7 @@ con un 200. En B, el mismo error rompe una prueba unitaria.
 | | Qué pasa |
 |---|---|
 | **B** | Cualquier excepción que no sea `OrderException` se captura en `OrdersApiHandler`. El stack trace va a CloudWatch y el cliente recibe `500 {"error":"INTERNAL_ERROR","message":"Unexpected internal error"}` sin detalles internos (probado en JUnit y en la Lambda desplegada, ver abajo). Si la Lambda misma se cae o hace timeout, API Gateway devuelve `502`/`504` `{"message": "Internal server error"}`. |
-| **A** | Las excepciones inesperadas se envuelven como `INTERNAL_ERROR: …` y se mapean a 500 por regex (probado del lado Java). Un **timeout o out-of-memory** de Lambda produce un `errorMessage` que no coincide con ninguna regex, así que API Gateway devuelve la **respuesta por defecto, 200**, con el error crudo. Es una debilidad real de A. Una regex comodín (`.+`) hacia 500 lo evitaría, pero es fácil olvidarla. |
+| **A** | Las excepciones inesperadas se envuelven como `INTERNAL_ERROR: …` y se mapean a 500 por regex (probado localmente en `MappingContractTest`). Un **timeout o out-of-memory** de Lambda produce un `errorMessage` que no coincide con ninguna regex, así que API Gateway devuelve la **respuesta por defecto, 200**, con el error crudo. Es una debilidad real de A. Una regex comodín (`.+`) hacia 500 lo evitaría, pero es fácil olvidarla. |
 
 **Evidencia en AWS (arquitectura B).** Para provocar un error realmente inesperado en la Lambda
 desplegada, invoqué `orders-b-proxy` desde la consola con un evento proxy que declara
@@ -571,15 +572,22 @@ triviales.
   el adaptador traduce a HTTP. Con lo que no estoy cómoda es con el contrato por prefijo de A. Es
   un protocolo de strings entre Java y VTL que ningún compilador verifica: si alguien cambia el
   texto `"ORDER_NOT_FOUND: "` en Java, la regex deja de coincidir y API Gateway devuelve un 200
-  con el error crudo. Las pruebas de `DirectOrderHandlersTest` protegen el lado Java, pero el lado
-  de las regex solo lo pude verificar desplegando y probando en la pestaña *Test* de API Gateway.
-  En B el mismo mapeo es un `switch` en Java que sí se prueba localmente, y eso para mí pesa más.
+  con el error crudo. El agente propuso fijar solo los mensajes en `DirectOrderHandlersTest`, pero
+  eso protege un lado del contrato: si alguien cambia la regex en `template.yaml`, ninguna prueba
+  falla. En B el mismo mapeo es un `switch` en Java que sí se prueba localmente, y eso para mí pesa
+  más.
 * **Alternativa:** poner `httpStatus` directamente en las excepciones del dominio (más simple,
   pero mete HTTP en el dominio). O, en A, devolver un sobre `{status, body}` en lugar de lanzar
   excepciones y mapearlo con un template. Eso elimina las regex, pero hace que los handlers Java
   conozcan HTTP, y en ese punto ya estás a medio camino de una integración proxy.
-* **¿Qué implementé y por qué?** La propuesta del agente, más `ArchitectureTest` para garantizar
-  que `domain/` siga sin imports de AWS/HTTP.
+* **¿Qué implementé y por qué?** La separación que propuso el agente, más dos pruebas que la
+  protegen. `ArchitectureTest` garantiza que `domain/` siga sin imports de AWS/HTTP. Y agregué
+  `MappingContractTest`, que el agente no había propuesto: lee las regex directamente de
+  `template.yaml`, lanza los errores reales de Java (404, 400 y 500) y comprueba que **exactamente
+  una** regex los selecciona con el estado esperado. También comprueba que el cálculo del template
+  VTL (`substring(indexOf(': ') + 2)`) devuelve el mensaje del dominio, y que `template-academy.yaml`
+  tiene los mismos mapeos. Lo verifiqué rompiendo a propósito la regex de `ORDER_NOT_FOUND`: la
+  prueba falla. El único límite que queda es que no ejecuta el motor real de API Gateway.
 
 ### Decisión 3 — dónde vive la validación
 
@@ -676,15 +684,25 @@ servidor, no en el código de respuesta.
 
 ## 13. Checklist de la demostración
 
-Video de la demostración (2:13): [`docs/demo.mp4`](docs/demo.mp4). Recorre los puntos en este
-orden, con un subtítulo en cada escena:
+Video de la demostración: [`docs/demo.mp4`](docs/demo.mp4). Recorre los puntos de abajo en
+orden, con un subtítulo en cada escena.
 
-1. `mvn test`: 47 pruebas, todas en verde.
+**Cómo se armó.** No es una grabación continua de pantalla. Es un montaje de material real,
+generado el 2026-10-26:
+
+* Los tramos de `mvn test` y `mvn package` muestran la salida real de Maven, ejecutado en esta
+  máquina y presentado como texto de terminal.
+* El resto son capturas del navegador: la consola de AWS Lambda, la pestaña *Test* de API Gateway
+  y las respuestas reales de la API desplegada.
+
+Para ver la ejecución en vivo basta con correr los comandos de §1.
+
+1. `mvn test`: 53 pruebas, todas en verde.
 2. `mvn package`: mostrar `target/orders-api-1.0.0.jar`.
 3. Invocar una Lambda directamente: *Test* en la consola con `events/direct-create-order.json` (o `aws lambda invoke`).
 4. Llamar a la API desplegada (comandos en [`docs/examples.md`](docs/examples.md)):
    POST exitoso (201 + `Location`), GET exitoso (200), 404 (`ORD-999`), 400 (`quantity: 0`).
-5. DELETE: `DELETE /orders/ORD-42` → 204, otra vez → 404, `GET /orders/ORD-42` → 404.
+5. DELETE del pedido recién creado → 204; otra vez → 404; `GET` de ese pedido → 404; `DELETE /orders/ORD-999` → 404.
 6. Error interno inesperado: invocación de `orders-b-proxy` → 500 `INTERNAL_ERROR` (§9).
 7. Del path a la Lambda: pestaña *Test* de API Gateway en A y en B (§14).
 8. Mostrar el diagrama de arquitectura (§10).

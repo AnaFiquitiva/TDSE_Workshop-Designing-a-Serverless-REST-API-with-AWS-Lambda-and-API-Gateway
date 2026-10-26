@@ -1,46 +1,66 @@
-# Final challenge — prediction for `DELETE /orders/{id}`
+# Reto final — predicción para `DELETE /orders/{id}`
 
-Written and committed **before** any DELETE code exists. The point is to compare it afterwards
-with what the change actually required (see the "Outcome" section, added in a later commit).
+La predicción está en su propio commit (`8f8a502`), anterior al commit que implementa DELETE
+(`14cdb04`). La sección "Resultado" se agregó después, para comparar la predicción con lo que el
+cambio realmente requirió y con lo que hizo la API desplegada.
 
-Expected behavior: `DELETE /orders/ORD-42` → `204 No Content` (empty body);
-`DELETE /orders/ORD-999` → `404 Not Found` with the standard error body.
+Comportamiento esperado: `DELETE /orders/ORD-42` → `204 No Content` (sin cuerpo);
+`DELETE /orders/ORD-999` → `404 Not Found` con el cuerpo de error estándar.
 
-| Question | Prediction |
+| Pregunta | Predicción |
 |---|---|
-| **Which Java classes should change?** | `OrderRepository` gets a `delete(id)` returning whether something was removed, implemented in `InMemoryOrderRepository`. `OrderService` gets `deleteOrder(id)`, which throws `OrderNotFoundException` if nothing was removed. `OrdersApiHandler` gets a `DELETE` case on `/orders/{id}` returning 204, and its `Allow` header becomes `GET, DELETE`. **Not** `Order`, `CreateOrderRequest` or the exceptions, since 404 already exists as `OrderNotFoundException`. |
-| **Do we need a new Lambda function?** | **No** in Architecture B (the final API). The same `orders-b-proxy` function handles the new route. In Architecture A it *would* need a new function (`orders-a-delete-order`) plus a new `DirectOrderHandlers` method, which is one of the scaling costs of A. A is not extended. |
-| **Does API Gateway configuration change?** | **Yes, a little.** API Gateway rejects methods it doesn't know about before calling Lambda, so a `DELETE` method has to be added on `/orders/{id}` with proxy integration (one new `Events` entry in `template.yaml`). Nothing else: no templates or response mappings. |
-| **Where should the deletion logic reside?** | In `OrderService.deleteOrder` (the application logic), with the actual removal in the repository. The adapter only extracts `id` and calls the service. |
-| **Where should the 204/404 decision reside?** | Split. The **service** decides the *fact* that the order does not exist (it throws `OrderNotFoundException`). The **HTTP adapter** decides what that fact means in HTTP: success → 204 with no body, `OrderNotFoundException` → 404 (the existing mapping). The service must not know the numbers 204/404. |
-| **Which tests should be added?** | `OrderServiceTest`: deleting an existing order removes it (a later `getOrder` throws), deleting a missing order throws `OrderNotFoundException`, a blank id throws `ValidationException`, and deleting one order leaves the customer's other orders. `OrdersApiHandlerTest`: `DELETE` existing → 204 with empty body; a `GET` afterwards → 404; `DELETE` missing → 404 `ORDER_NOT_FOUND`; deleting twice → second one 404; `Allow` header now lists `DELETE`. |
+| **¿Qué clases Java deben cambiar?** | `OrderRepository` gana un `delete(id)` que indica si se borró algo, implementado en `InMemoryOrderRepository`. `OrderService` gana `deleteOrder(id)`, que lanza `OrderNotFoundException` si no se borró nada. `OrdersApiHandler` gana un caso `DELETE` en `/orders/{id}` que devuelve 204, y su header `Allow` pasa a `GET, DELETE`. **No** cambian `Order`, `CreateOrderRequest` ni las excepciones, porque el 404 ya existe como `OrderNotFoundException`. |
+| **¿Se necesita una Lambda nueva?** | **No** en la arquitectura B (la API final): la misma `orders-b-proxy` atiende la ruta nueva. En la arquitectura A *sí* haría falta (`orders-a-delete-order`) más un método nuevo en `DirectOrderHandlers`, que es uno de los costos de escalar A. A no se extiende. |
+| **¿Cambia la configuración de API Gateway?** | **Sí, poco.** API Gateway rechaza los métodos que no conoce antes de llamar a Lambda, así que hay que agregar un método `DELETE` en `/orders/{id}` con integración proxy (un `Events` nuevo en `template.yaml`). Nada más: ni templates ni mapeos de respuesta. |
+| **¿Dónde vive la lógica de borrado?** | En `OrderService.deleteOrder` (lógica de aplicación), con el borrado efectivo en el repositorio. El adaptador solo extrae `id` y llama al servicio. |
+| **¿Dónde se decide 204 o 404?** | Repartido. El **servicio** decide el *hecho* de que el pedido no existe (lanza `OrderNotFoundException`). El **adaptador HTTP** decide qué significa ese hecho en HTTP: éxito → 204 sin cuerpo, `OrderNotFoundException` → 404 (el mapeo que ya existía). El servicio no debe conocer los números 204/404. |
+| **¿Qué pruebas se agregan?** | `OrderServiceTest`: borrar un pedido existente lo elimina (un `getOrder` posterior falla), borrar uno inexistente lanza `OrderNotFoundException`, un id vacío lanza `ValidationException`, y borrar un pedido no afecta los otros pedidos del cliente. `OrdersApiHandlerTest`: `DELETE` existente → 204 sin cuerpo; un `GET` después → 404; `DELETE` inexistente → 404 `ORDER_NOT_FOUND`; borrar dos veces → la segunda da 404; el header `Allow` incluye `DELETE`. |
 
-Open question to check: should a second DELETE of the same order return 404 or 204? DELETE is
-*idempotent* in terms of server **state** (the order is gone either way), not in terms of the
-response code. The workshop's contract says nonexistent → 404, so the second call returns 404.
+Pregunta abierta: ¿un segundo DELETE del mismo pedido debe dar 404 o 204? DELETE es *idempotente*
+en el **estado** del servidor (el pedido deja de existir en ambos casos), no en el código de
+respuesta. El contrato del taller dice inexistente → 404, así que la segunda llamada da 404.
 
 ---
 
-## Outcome (added after implementing)
+## Resultado (agregado después de implementar)
 
-What the change actually touched:
+### Lo que el cambio tocó realmente
 
-| File | Change | Predicted? |
+| Archivo | Cambio | ¿Predicho? |
 |---|---|---|
-| `domain/OrderRepository.java` | `boolean deleteById(String id)` | ✔ (name differs) |
+| `domain/OrderRepository.java` | `boolean deleteById(String id)` | ✔ (cambia el nombre) |
 | `domain/InMemoryOrderRepository.java` | `orders.remove(id) != null` | ✔ |
-| `domain/OrderService.java` | `deleteOrder(id)`: validates id, throws `OrderNotFoundException` when nothing was removed | ✔ |
+| `domain/OrderService.java` | `deleteOrder(id)`: valida el id y lanza `OrderNotFoundException` si no se borró nada | ✔ |
 | `lambda/proxy/OrdersApiHandler.java` | `case "DELETE"` → `noContent()`; `Allow: GET, DELETE` | ✔ |
-| `lambda/proxy/OrdersApiHandler.java` | new `noContent()` helper: a 204 must have **no body and no `Content-Type`**, so the usual `jsonHeaders()` could not be reused | ✘ not predicted |
-| `template.yaml` | one `DeleteOrder` event (`DELETE /orders/{id}`) on the same function | ✔ |
-| Tests | +5 in `OrderServiceTest`, +4 in `OrdersApiHandlerTest` (204 + empty body, GET afterwards 404, missing 404, twice → 204 then 404, `Allow` header) | ✔ |
-| `Order`, `CreateOrderRequest`, exceptions, `DirectOrderHandlers` | unchanged | ✔ |
+| `lambda/proxy/OrdersApiHandler.java` | helper nuevo `noContent()`: un 204 no lleva **cuerpo ni `Content-Type`**, así que no se podía reutilizar `jsonHeaders()` | ✘ no predicho |
+| `template.yaml` | un evento `DeleteOrder` (`DELETE /orders/{id}`) en la misma función | ✔ |
+| Pruebas | +5 en `OrderServiceTest`, +4 en `OrdersApiHandlerTest` | ✔ |
+| `Order`, `CreateOrderRequest`, excepciones, `DirectOrderHandlers` | sin cambios | ✔ |
 
-**Agent's proposal vs. the prediction:** they matched on every structural point: no new
-Lambda, one new API Gateway method, logic in the service, and the 204/404 decision in the adapter.
-That is expected, because the prediction was drafted with the same agent. The useful lesson is
-how *small* the change was in Architecture B: three lines in the domain, five in the adapter, one
-route in the gateway, and **no new error handling**. The 404 came for free from the existing
-`OrderNotFoundException` → 404 mapping. The same feature in Architecture A would have needed a new
-Lambda, a new handler method, a mapping template, a method response for 204, and integration
-responses for 404, 400 and 500.
+### Verificación contra la API desplegada (2026-10-26)
+
+| Predicción | Lo que hizo AWS | Evidencia |
+|---|---|---|
+| DELETE existente → 204 sin cuerpo | `HTTP 204`, sin cuerpo y sin `Content-Type` | `docs/evidence/http-b-02-delete.jpg` |
+| Segundo DELETE → 404 (idempotente en estado, no en código) | `HTTP 404 ORDER_NOT_FOUND` | misma captura |
+| `GET` después de borrar → 404 | `HTTP 404 ORDER_NOT_FOUND` | misma captura |
+| API Gateway rechaza métodos no declarados antes de llamar a Lambda | En la arquitectura A, que no tiene DELETE, `DELETE /orders/ORD-001` devuelve `404 ROUTE_NOT_FOUND` desde la *gateway response*, sin invocar ninguna Lambda | `docs/evidence/http-a-01-mapping-api.jpg` |
+| No hace falta una Lambda nueva en B | La ruta `DELETE` aparece en `orders-api-proxy` integrada con la misma `orders-b-proxy` | `docs/evidence/apigw-b-01-proxy-resources-delete.jpg` |
+
+### Comparación con la propuesta del agente y limitación
+
+La predicción y la implementación se hicieron en la misma sesión de trabajo con el agente. Por eso
+que coincidan en todos los puntos estructurales no prueba un criterio independiente: era
+esperable. Lo que sí aporta este ejercicio es lo siguiente:
+
+* **Un punto que nadie anticipó.** El helper `noContent()` existe porque un 204 con
+  `Content-Type: application/json` y cuerpo vacío es un error de protocolo. La predicción no lo
+  vio, y es el tipo de detalle que solo aparece al escribir la prueba ("204 sin cuerpo").
+* **Una afirmación que se pudo comprobar en AWS.** "API Gateway rechaza los métodos que no conoce
+  antes de llamar a Lambda" no venía del código, sino del conocimiento sobre API Gateway. El
+  despliegue la confirmó: el DELETE en la arquitectura A nunca llega a Lambda.
+* **El costo real del cambio en B:** tres líneas en el dominio, cinco en el adaptador, una ruta en
+  el gateway y **ningún manejo de errores nuevo**, porque el 404 salió gratis del mapeo
+  `OrderNotFoundException` → 404 que ya existía. En la arquitectura A la misma funcionalidad
+  habría necesitado una Lambda nueva, un método nuevo en el handler, un mapping template, una
+  method response para 204 e integration responses para 404, 400 y 500.
