@@ -32,6 +32,7 @@ Gateway** con dos arquitecturas que comparten la misma lógica de aplicación en
 11. [Desarrollo asistido por IA — crítica al agente](#11-desarrollo-asistido-por-ia--crítica-al-agente)
 12. [Reto final — DELETE](#12-reto-final--delete)
 13. [Checklist de la demostración](#13-checklist-de-la-demostración)
+14. [Despliegue real y evidencias](#14-despliegue-real-y-evidencias)
 
 Otros documentos:
 
@@ -39,6 +40,8 @@ Otros documentos:
 * [`docs/examples.md`](docs/examples.md): ejemplos de peticiones y respuestas (curl).
 * [`docs/delete-prediction.md`](docs/delete-prediction.md): predicción del reto DELETE y su resultado.
 * [`template.yaml`](template.yaml): infraestructura como código de ambas arquitecturas, con todos los mapping templates.
+* [`template-academy.yaml`](template-academy.yaml): la misma plantilla adaptada a AWS Academy (código desde S3 y rol `LabRole`); es la que se desplegó.
+* [`docs/evidence/`](docs/evidence/): capturas del despliegue real (§14).
 * [`events/`](events/): payloads de ejemplo. `direct-*.json` sirven para invocar las Lambdas directamente; `proxy-*.json` son eventos proxy de API Gateway.
 
 ---
@@ -229,18 +232,25 @@ normal con métodos como `Order createOrder(CreateOrderRequest)`.
 
 ### Verificación contra la Lambda desplegada
 
-La explicación anterior vino del LLM. Ejecuta estas invocaciones, compáralas con la columna
-"Esperado" y anota lo que realmente observaste:
+La explicación anterior vino del LLM. Estas invocaciones se ejecutaron el 2026-10-26 desde la
+pestaña *Test* de la consola de Lambda (stack `orders-api` en `us-east-1`). La columna "Observado"
+es lo que devolvió realmente la Lambda desplegada:
 
-| Entrada | Esperado (según la explicación) | Observado |
-|---|---|---|
-| `direct-create-order.json` | `{"id":"ORD-XXXXXXXX","customerId":"CUST-42","product":"MacBook Air","quantity":1}` | |
-| `direct-create-order-2.json` | id nuevo, `CUST-100`, `quantity: 3` | |
-| `{"customerId":"CUST-42","product":"Mouse","quantity":1,"color":"red"}` | funciona, `color` se ignora | |
-| `{"customerId":"CUST-42","product":"Mouse"}` | error, `errorMessage: "VALIDATION_ERROR: quantity is required"` (lo que falta → `null`) | |
-| `{"customerId":"CUST-42","product":"Mouse","quantity":"2"}` | funciona, `"2"` se convierte en `2` | |
-| `direct-create-order-invalid.json` | `errorMessage: "VALIDATION_ERROR: quantity must be greater than 0"`, `errorType: ...DirectInvocationException` | |
-| invocar `orders-a-get-order` con `direct-get-order-missing.json` | `errorMessage: "ORDER_NOT_FOUND: Order ORD-999 does not exist"` | |
+| Entrada | Esperado (según la explicación) | Observado | Evidencia |
+|---|---|---|---|
+| `direct-create-order.json` | `{"id":"ORD-XXXXXXXX","customerId":"CUST-42","product":"MacBook Air","quantity":1}` | ✅ `{"id":"ORD-D0CA1498","customerId":"CUST-42","product":"MacBook Air","quantity":1}` | [captura](docs/evidence/lambda-01-create-order-cust42.jpg) |
+| `direct-create-order-2.json` | id nuevo, `CUST-100`, `quantity: 3` | ✅ `{"id":"ORD-6AEACE5E","customerId":"CUST-100","product":"Mechanical Keyboard","quantity":3}` | [captura](docs/evidence/lambda-02-create-order-cust100.jpg) |
+| `{"customerId":"CUST-42","product":"Mouse","quantity":1,"color":"red"}` | funciona, `color` se ignora | ✅ `{"id":"ORD-AB67A9B9",…,"product":"Mouse","quantity":1}`, sin `color` y sin error | [captura](docs/evidence/lambda-03-unknown-field-ignored.jpg) |
+| `{"customerId":"CUST-42","product":"Mouse"}` | error, `errorMessage: "VALIDATION_ERROR: quantity is required"` (lo que falta → `null`) | ✅ *function error*, `errorMessage: "VALIDATION_ERROR: quantity is required"` | [captura](docs/evidence/lambda-04-missing-quantity.jpg) |
+| `{"customerId":"CUST-42","product":"Mouse","quantity":"2"}` | funciona, `"2"` se convierte en `2` | ✅ `"quantity": 2` (número) en la respuesta | [captura](docs/evidence/lambda-05-string-quantity-coerced.jpg) |
+| `direct-create-order-invalid.json` | `errorMessage: "VALIDATION_ERROR: quantity must be greater than 0"`, `errorType: ...DirectInvocationException` | ✅ exactamente eso, más `stackTrace` | [captura](docs/evidence/lambda-06-invalid-quantity.jpg) |
+| invocar `orders-a-get-order` con `direct-get-order-missing.json` | `errorMessage: "ORDER_NOT_FOUND: Order ORD-999 does not exist"` | ✅ exactamente eso, `errorType: ...DirectInvocationException` | [captura](docs/evidence/lambda-07-get-order-missing.jpg) |
+
+**Conclusión de la verificación.** La explicación del LLM coincidió en los siete casos. Un hallazgo
+adicional, no planeado: la primera invocación salió por error con el evento de ejemplo
+"Hello World" de la consola (`{"key1":"value1",...}`) y la respuesta fue
+`VALIDATION_ERROR: customerId is required`. Esto confirma por otra vía la regla 2: las claves desconocidas
+se ignoraron y todos los campos de `CreateOrderRequest` quedaron en `null`.
 
 ### Checkpoint 2 — el flujo real
 
@@ -377,7 +387,9 @@ un evento, y la Lambda debe devolver `{statusCode, headers, body}`.
 
 ### Dónde aparece cada dato en el evento proxy
 
-Ejemplo: [`events/proxy-get-order.json`](events/proxy-get-order.json); también `proxy-find-orders.json` y `proxy-create-order.json`.
+Ejemplo: [`events/proxy-get-order.json`](events/proxy-get-order.json); también `proxy-find-orders.json`, `proxy-create-order.json` y `proxy-delete-order.json`.
+
+**Evento real capturado en AWS:** [`events/proxy-get-order-captured.json`](events/proxy-get-order-captured.json). Es el JSON exacto que API Gateway envió a `orders-b-proxy` para `GET /orders/ORD-001`, sacado del log de la pestaña *Test* de API Gateway (credenciales temporales y usuario ocultos). Ver §14.
 
 | Información | Campo del evento (REST API, payload v1) | Ejemplo |
 |---|---|---|
@@ -601,7 +613,12 @@ servidor, no en el código de respuesta.
 
 ## 13. Checklist de la demostración
 
-Video: *(agregar enlace)*
+Video (sin audio, 1:58): [`docs/demo.mp4`](docs/demo.mp4).
+
+Se armó el 2026-10-26 a partir de material real. Las partes de `mvn test` y `mvn package` muestran
+la salida de Maven capturada en la máquina local y presentada como terminal. Lo demás son capturas
+del navegador: la consola de Lambda con la invocación directa, la pestaña Test de API Gateway (path → JSON que recibe cada Lambda), las llamadas a la API desplegada
+(arquitectura B) y el diagrama de §10. Cada escena lleva un subtítulo.
 
 1. `mvn test`: 47 pruebas, todas en verde.
 2. `mvn package`: mostrar `target/orders-api-1.0.0.jar`.
@@ -610,3 +627,108 @@ Video: *(agregar enlace)*
    POST exitoso (201 + `Location`), GET exitoso (200), 404 (`ORD-999`), 400 (`quantity: 0`).
 5. DELETE: `DELETE /orders/ORD-42` → 204, otra vez → 404, `GET /orders/ORD-42` → 404.
 6. Mostrar el diagrama de arquitectura (§10).
+
+---
+
+## 14. Despliegue real y evidencias
+
+Ambas arquitecturas se desplegaron el **2026-10-26** en una cuenta de **AWS Academy Learner Lab**
+(`us-east-1`), como un solo stack de CloudFormation llamado `orders-api`:
+
+| Salida | URL base |
+|---|---|
+| A — mapping templates (`MappedApiUrl`) | `https://iykcgamnof.execute-api.us-east-1.amazonaws.com/prod` |
+| B — proxy, API final (`ProxyApiUrl`) | `https://6j1hv8udp0.execute-api.us-east-1.amazonaws.com/prod` |
+
+> Las URLs dejan de funcionar cuando la sesión del laboratorio termina o se borra el stack.
+
+**Adaptaciones obligadas por el laboratorio.** `sam deploy` no se pudo usar tal cual:
+
+1. CloudShell no obtenía credenciales (`Error retrieving credentials from container-role`), así
+   que no había CLI dentro de AWS.
+2. El Learner Lab no permite crear roles IAM, y SAM crea uno por función.
+
+Por eso se agregó [`template-academy.yaml`](template-academy.yaml). Es idéntica a `template.yaml`
+salvo en dos cosas: el código viene de un bucket S3 (parámetros `CodeBucket`/`CodeKey`) y cada
+función usa el rol existente `LabRole`. El despliegue se hizo desde la consola:
+
+1. `mvn package` y subir `target/orders-api-1.0.0.jar` a un bucket S3 privado.
+2. CloudFormation → *Create stack* → subir `template-academy.yaml` → `CodeBucket` = nombre del bucket.
+3. Aceptar `CAPABILITY_AUTO_EXPAND`, necesario por el `Transform` de SAM.
+
+Un primer intento falló porque `Role` no se acepta dentro de `Globals` en SAM
+(`'Role' is not a supported property of 'Function'`). Por eso el rol se declara en cada función.
+
+### Infraestructura creada
+
+| | |
+|---|---|
+| Recursos del stack: 4 Lambdas, 2 REST APIs, permisos y deployments | ![](docs/evidence/aws-01-cloudformation-resources.jpg) |
+| Salidas del stack: las dos URLs base | ![](docs/evidence/aws-02-cloudformation-outputs.jpg) |
+| A: recursos y métodos de `orders-api-mapping` | ![](docs/evidence/apigw-a-01-resources.jpg) |
+| A: `GET /orders/{id}`, integración Lambda no proxy | ![](docs/evidence/apigw-a-02-get-order-method-execution.jpg) |
+| A: mapping template de la petición, que extrae `{id}` del path | ![](docs/evidence/apigw-a-03-get-order-request-mapping-template.jpg) |
+| A: integration response, regex `ORDER_NOT_FOUND:.*` → 404 | ![](docs/evidence/apigw-a-04-get-order-integration-response-404.jpg) |
+| B: `orders-api-proxy` con `DELETE /orders/{id}` e integración *Proxy* | ![](docs/evidence/apigw-b-01-proxy-resources-delete.jpg) |
+
+### Del path HTTP a la Lambda: pestaña *Test* de API Gateway
+
+La pestaña *Test* de cada método muestra el path pedido, cómo lo interpreta API Gateway y el JSON
+exacto que recibe la Lambda (`Endpoint request body after transformations`). Aquí se ve la
+diferencia real entre las dos arquitecturas.
+
+En los logs se ocultaron (`[REDACTED]`) el `X-Amz-Security-Token`, la firma `Authorization`, el
+`accessKey` temporal y el usuario del laboratorio.
+
+| Petición | Lo que muestra el log | Captura |
+|---|---|---|
+| **A** `GET /orders/ORD-42` | `Resource Path: /orders/ORD-42` → `Method request path: {id=ORD-42}` | ![](docs/evidence/apigw-a-05-test-get-order-path.jpg) |
+| **A** `GET /orders/ORD-42` | El mapping template convierte la petición en `{"id": "ORD-42"}`, lo único que recibe `orders-a-get-order` | ![](docs/evidence/apigw-a-06-test-get-order-transformed-body.jpg) |
+| **A** `GET /orders?customerId=CUST-42` | `Method request query string: {customerId=CUST-42}` | ![](docs/evidence/apigw-a-07-test-find-orders-query.jpg) |
+| **A** `GET /orders?customerId=CUST-42` | Body transformado `{"customerId": "CUST-42"}` hacia `orders-a-find-orders` | ![](docs/evidence/apigw-a-08-test-find-orders-transformed-body.jpg) |
+| **B** `GET /orders/ORD-001` | Mismo path y `{id=ORD-001}`, pero sin transformación | ![](docs/evidence/apigw-b-02-test-get-order-path.jpg) |
+| **B** `GET /orders/ORD-001` | La Lambda recibe el **evento proxy completo**: `path`, `httpMethod`, `headers`, `pathParameters`, `queryStringParameters: null`, `body: null`. La respuesta es `{"statusCode":200,"headers":…,"body":"…"}` | ![](docs/evidence/apigw-b-03-test-get-order-proxy-event.jpg) |
+| **B** `GET /orders?customerId=CUST-42` | En el evento proxy, `queryStringParameters: {"customerId":"CUST-42"}` y `pathParameters: null` | ![](docs/evidence/apigw-b-04-test-find-orders-query-proxy-event.jpg) |
+
+En A, API Gateway extrae el dato y la Lambda solo ve `{"id": ...}`. En B, la Lambda recibe la
+petición HTTP entera y es `OrdersApiHandler` quien lee `pathParameters` o `queryStringParameters`.
+También se ve en la respuesta: en B la Lambda devuelve `statusCode`, `headers` y `body`; en A
+devuelve el `Order` tal cual y API Gateway decide el código de estado.
+
+### Invocación directa de Lambda (Parte II)
+
+Las siete capturas `docs/evidence/lambda-0*.jpg` están enlazadas en la tabla de
+[§5](#verificación-contra-la-lambda-desplegada).
+
+### Llamadas HTTP a la API desplegada
+
+Las capturas muestran las respuestas reales: código de estado, headers relevantes y cuerpo. Se
+generaron con `fetch` desde el mismo origen de cada API, para poder mostrar en una sola página el
+código, los headers y el cuerpo de cada respuesta.
+
+**B — POST 201 + `Location`, GET 200, búsqueda por cliente, 404 y 400**
+
+![](docs/evidence/http-b-01-post-get-404-400.jpg)
+
+**B — DELETE: 204, luego 404 al repetir, 404 en GET y 404 en ruta desconocida**
+
+![](docs/evidence/http-b-02-delete.jpg)
+
+**A — las mismas operaciones con mapping templates**
+
+![](docs/evidence/http-a-01-mapping-api.jpg)
+
+### Lo que el despliegue real enseñó
+
+* **La memoria de Lambda no es persistencia y además no se comparte.** En A, el pedido creado con
+  `POST` (que corre en `orders-a-create-order`) **no aparece** en `GET /orders?customerId=CUST-42`,
+  que corre en `orders-a-find-orders`. Cada función tiene su propio `InMemoryOrderRepository`. En B
+  sí aparece, porque una sola Lambda atiende todas las rutas, pero solo mientras esa instancia
+  siga caliente. Esto refuerza que un sistema real necesita un repositorio externo (por ejemplo
+  DynamoDB) detrás de `OrderRepository`.
+* **Los 400 de A no siempre vienen de Java.** Un `POST` sin `quantity` lo rechaza el validador de
+  modelos de API Gateway (`"Invalid request body"`) antes de invocar la Lambda. Un `POST` con
+  `quantity: 0` sí llega a Java y se mapea por regex (`"quantity must be greater than 0"`). En B,
+  ambos mensajes vienen de la misma validación de dominio, así que son más precisos y consistentes.
+* **DELETE solo existe en B.** En A, `DELETE /orders/{id}` devuelve el 404 `ROUTE_NOT_FOUND` de la
+  gateway response.

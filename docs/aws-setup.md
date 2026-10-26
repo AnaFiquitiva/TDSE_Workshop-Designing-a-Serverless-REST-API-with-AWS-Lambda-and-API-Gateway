@@ -31,6 +31,19 @@ The stack outputs two base URLs:
 
 Delete everything with `sam delete`.
 
+### Option 1b — AWS Academy Learner Lab (what was actually deployed)
+
+The lab cannot create IAM roles and its CloudShell may have no credentials, so use
+`template-academy.yaml` (same resources; code from S3, every function uses `LabRole`):
+
+1. `mvn clean package`, then upload `target/orders-api-1.0.0.jar` to a private S3 bucket.
+2. CloudFormation → **Create stack** → *Upload a template file* → `template-academy.yaml`.
+3. Stack name `orders-api`, parameter `CodeBucket` = your bucket (`CodeKey` defaults to the JAR name).
+4. Acknowledge the capabilities (`CAPABILITY_AUTO_EXPAND` is required by the SAM transform) → **Submit**.
+5. The **Outputs** tab shows `MappedApiUrl` and `ProxyApiUrl`.
+
+Delete the stack (and empty the bucket) when finished.
+
 ---
 
 ## Option 2 — AWS Console

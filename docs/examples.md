@@ -2,9 +2,9 @@
 
 ```bash
 # Architecture B (proxy) — the final API
-API=https://<proxy-api-id>.execute-api.us-east-1.amazonaws.com/prod
+API=https://6j1hv8udp0.execute-api.us-east-1.amazonaws.com/prod   # deployed 2026-10-26 (AWS Academy)
 # Architecture A (mapping templates) — same requests work, except DELETE
-# API=https://<mapped-api-id>.execute-api.us-east-1.amazonaws.com/prod
+# API=https://iykcgamnof.execute-api.us-east-1.amazonaws.com/prod
 ```
 
 The repository is seeded with `ORD-001`, `ORD-002` (CUST-42), `ORD-003` (CUST-100) and
