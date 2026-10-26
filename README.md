@@ -460,8 +460,25 @@ con un 200. En B, el mismo error rompe una prueba unitaria.
 
 | | Qué pasa |
 |---|---|
-| **B** | Cualquier excepción que no sea `OrderException` se captura en `OrdersApiHandler`. El stack trace va a CloudWatch y el cliente recibe `500 {"error":"INTERNAL_ERROR","message":"Unexpected internal error"}` sin detalles internos (probado). Si la Lambda misma se cae o hace timeout, API Gateway devuelve `502`/`504` `{"message": "Internal server error"}`. |
+| **B** | Cualquier excepción que no sea `OrderException` se captura en `OrdersApiHandler`. El stack trace va a CloudWatch y el cliente recibe `500 {"error":"INTERNAL_ERROR","message":"Unexpected internal error"}` sin detalles internos (probado en JUnit y en la Lambda desplegada, ver abajo). Si la Lambda misma se cae o hace timeout, API Gateway devuelve `502`/`504` `{"message": "Internal server error"}`. |
 | **A** | Las excepciones inesperadas se envuelven como `INTERNAL_ERROR: …` y se mapean a 500 por regex (probado del lado Java). Un **timeout o out-of-memory** de Lambda produce un `errorMessage` que no coincide con ninguna regex, así que API Gateway devuelve la **respuesta por defecto, 200**, con el error crudo. Es una debilidad real de A. Una regex comodín (`.+`) hacia 500 lo evitaría, pero es fácil olvidarla. |
+
+**Evidencia en AWS (arquitectura B).** Para provocar un error realmente inesperado en la Lambda
+desplegada, invoqué `orders-b-proxy` desde la consola con un evento proxy que declara
+`"isBase64Encoded": true` pero cuyo `body` no es base64 válido. `Base64.getDecoder()` lanza una
+`IllegalArgumentException`, que no es un error de dominio, y el `catch (RuntimeException e)` del
+adaptador la convierte en 500. El cliente recibe solo el mensaje genérico y el detalle queda en
+el log.
+
+Este caso no se puede provocar con una petición HTTP normal: API Gateway solo envía cuerpos en
+base64 si se configuran *binary media types*, y esta API no los tiene. Por eso se usó la
+invocación directa.
+
+| | |
+|---|---|
+| Evento de entrada (POST con `body` base64 inválido) | ![](docs/evidence/lambda-08-proxy-500-event.jpg) |
+| Respuesta: `statusCode: 500`, `{"error":"INTERNAL_ERROR","message":"Unexpected internal error"}` | ![](docs/evidence/lambda-09-proxy-500-response.jpg) |
+| Log de la Lambda: `Unexpected error: java.lang.IllegalArgumentException: Illegal base64 character 25` en `OrdersApiHandler.parseBody` | ![](docs/evidence/lambda-10-proxy-500-log.jpg) |
 
 ---
 
@@ -516,9 +533,6 @@ Este proyecto se construyó con un agente de programación con IA. Se le pidió
 proponer la arquitectura antes de escribir código. A continuación se analizan sus decisiones no
 triviales.
 
-> ✍️ **Nota personal:** las partes factuales (decisión, alternativas, qué se implementó)
-> corresponden al código. Los párrafos *"¿Estoy de acuerdo?"* son un borrador; revisarlos y
-> reescribirlos con mis propias palabras antes de entregar.
 
 ### Decisión 1 — una Lambda por operación en A, una Lambda para toda la API en B
 
@@ -530,12 +544,14 @@ triviales.
   función. Una sola función necesitaría un campo extra `"operation"` y un despachador, lo que
   vuelve a meter el enrutamiento en Java. Con proxy, el handler ya recibe el método y la ruta, así
   que una sola función es lo natural.
-* **¿Estoy de acuerdo?** *(borrador)* En general sí: muestra cada estilo como se usa normalmente.
-  Pero el agente no mencionó una consecuencia hasta que se le pidió analizarla: con
-  almacenamiento en memoria, **el POST de A crea pedidos que el GET de A nunca puede ver**, porque
-  cada función tiene su propia JVM. Para el taller es una buena demostración de que la memoria de
-  Lambda no es almacenamiento; en un sistema real obligaría a usar una base de datos compartida
-  desde el principio.
+* **¿Estoy de acuerdo?** En parte. Para el taller tiene sentido, porque muestra cada estilo como
+  se usa normalmente. Pero el agente no advirtió la consecuencia más importante hasta que la vi en
+  el despliegue real: con almacenamiento en memoria, **el POST de A crea pedidos que el GET de A
+  nunca ve**, porque cada función corre en su propia JVM. Lo comprobé en AWS (§14): el pedido
+  creado por `orders-a-create-order` no aparece en `GET /orders?customerId=CUST-42`. En B sí
+  aparece, pero solo porque una única Lambda atiende todo y mientras siga caliente. Para mí esto
+  muestra que la decisión de "una Lambda por operación" no se puede separar de la decisión de
+  persistencia: con varias funciones, la base de datos compartida es obligatoria desde el día uno.
 * **Alternativa:** una sola Lambda para A, con el nombre de la operación inyectado por cada
   mapping template (`{"operation":"get","id":...}`), o DynamoDB detrás de ambas.
 * **¿Qué implementé y por qué?** La propuesta del agente, con la limitación documentada (§6). La
@@ -551,11 +567,13 @@ triviales.
   asunto del transporte, así que el mismo servicio podría estar detrás de un CLI o de una cola. El
   prefijo existe porque, en la integración sin proxy, `errorMessage` es *lo único* sobre lo que
   API Gateway puede seleccionar.
-* **¿Estoy de acuerdo?** *(borrador)* Sí en la separación dominio/adaptador. Pero el contrato por
-  prefijo en A es frágil: es un protocolo de strings entre Java y VTL que ningún compilador
-  verifica. El agente agregó pruebas que fijan los mensajes exactos (`DirectOrderHandlersTest`),
-  lo que reduce el riesgo del lado Java, pero el lado de las regex sigue sin poder probarse
-  localmente.
+* **¿Estoy de acuerdo?** Sí con la separación dominio/adaptador: el dominio habla de pedidos y
+  el adaptador traduce a HTTP. Con lo que no estoy cómoda es con el contrato por prefijo de A. Es
+  un protocolo de strings entre Java y VTL que ningún compilador verifica: si alguien cambia el
+  texto `"ORDER_NOT_FOUND: "` en Java, la regex deja de coincidir y API Gateway devuelve un 200
+  con el error crudo. Las pruebas de `DirectOrderHandlersTest` protegen el lado Java, pero el lado
+  de las regex solo lo pude verificar desplegando y probando en la pestaña *Test* de API Gateway.
+  En B el mismo mapeo es un `switch` en Java que sí se prueba localmente, y eso para mí pesa más.
 * **Alternativa:** poner `httpStatus` directamente en las excepciones del dominio (más simple,
   pero mete HTTP en el dominio). O, en A, devolver un sobre `{status, body}` en lugar de lanzar
   excepciones y mapearlo con un template. Eso elimina las regex, pero hace que los handlers Java
@@ -573,10 +591,14 @@ triviales.
   `minimum: 1` en el JSON Schema), B y cualquier otro punto de entrada tendrían que duplicarlas, y
   las pruebas en Java puro no las cubrirían. Al dejarlas en el servicio, todas las arquitecturas
   las aplican.
-* **¿Estoy de acuerdo?** *(borrador)* Sí. Un detalle que vale la pena notar es que el agente
-  desactivó explícitamente `ACCEPT_FLOAT_AS_INT` de Jackson. Sin eso, `"quantity": 1.9` se
-  convertiría en `1` en silencio. Buen hallazgo; es el tipo de valor por defecto que se pasa por
-  alto fácilmente.
+* **¿Estoy de acuerdo?** Sí. Las reglas de negocio deben vivir en un solo lugar, y ese lugar es el
+  servicio, porque es lo único que comparten A y B. El despliegue mostró un efecto secundario que
+  no esperaba: en A un `POST` sin `quantity` lo rechaza el validador de API Gateway con un mensaje
+  genérico (`"Invalid request body"`), mientras que en B el mismo error llega con el mensaje preciso
+  del dominio (`"quantity is required"`). Es decir, validar en la puerta de entrada tiene un costo
+  en la calidad de los mensajes de error. También me pareció un buen hallazgo que el agente
+  desactivara `ACCEPT_FLOAT_AS_INT` de Jackson; sin eso, `"quantity": 1.9` se convertiría en `1`
+  sin avisar.
 * **Alternativa:** Bean Validation (anotaciones `jakarta.validation`) en `CreateOrderRequest`. Es
   declarativo y estándar, pero agrega una dependencia al dominio por tres reglas.
 * **¿Qué implementé y por qué?** La propuesta del agente. La duplicación en A (el gateway revisa
@@ -588,10 +610,51 @@ triviales.
   no `ORD-001, ORD-002…`. El generador se puede inyectar para las pruebas.
 * **¿Por qué creo que lo propuso?** Un contador en memoria vuelve a 1 en cada cold start y en cada
   entorno de ejecución concurrente, así que entregaría ids duplicados.
-* **¿Estoy de acuerdo?** *(borrador)* Sí, para este contexto. Ocho caracteres hexadecimales pueden
-  colisionar a gran escala; un sistema real usaría el UUID completo o dejaría que la base de datos
-  genere la clave.
-* **¿Qué implementé?** La propuesta del agente.
+* **¿Estoy de acuerdo?** Sí. Un contador en memoria es incorrecto en Lambda por la misma razón que
+  la Decisión 1: cada entorno de ejecución tiene su propia memoria, así que dos instancias darían
+  el mismo `ORD-001`. Mi única objeción es la longitud: 8 caracteres hexadecimales son unos 4 mil
+  millones de valores, suficientes para un taller pero no para un sistema real, donde usaría el
+  UUID completo o dejaría que la base de datos genere la clave.
+* **¿Qué implementé?** La propuesta del agente, aceptando esa limitación de forma consciente.
+
+### Decisión 5 — desplegar con `sam deploy` y roles IAM creados por SAM *(no la seguí)*
+
+* **Decisión del agente:** `template.yaml` deja que SAM cree un rol IAM por función, y el plan de
+  despliegue era `sam deploy --guided` desde una terminal con credenciales (CloudShell). Cuando el
+  laboratorio impidió crear roles, su primera corrección fue declarar `Role: LabRole` dentro de
+  `Globals`.
+* **¿Por qué creo que lo propuso?** Es el camino estándar de SAM en una cuenta normal: un comando,
+  roles con mínimo privilegio y nada manual. El agente asumió una cuenta con permisos completos.
+* **¿Estoy de acuerdo?** No, para este entorno. En AWS Academy, CloudShell no obtenía credenciales
+  y la cuenta no permite crear roles IAM, así que el plan no podía funcionar. La corrección en
+  `Globals` además falló al desplegar: CloudFormation respondió
+  `'Role' is not a supported property of 'Function'` dentro de `Globals`. El agente propuso una
+  corrección sin verificar que SAM la aceptara.
+* **Alternativa:** pedir permisos de IAM o usar otra cuenta. Ninguna era posible en el laboratorio.
+* **¿Qué implementé y por qué?** Algo distinto. Dejé `template.yaml` intacto como versión
+  "ideal" y creé `template-academy.yaml`: el código se toma de un bucket S3 (parámetros
+  `CodeBucket`/`CodeKey`) y **cada función** declara el rol existente `LabRole`. Lo desplegué desde
+  la consola de CloudFormation. Así el repositorio sirve para una cuenta normal y para el
+  laboratorio, y la diferencia entre los dos archivos se limita a esas líneas.
+
+### Decisión 6 — eventos proxy de ejemplo escritos a mano *(no la seguí)*
+
+* **Decisión del agente:** para la Parte V generó `events/proxy-*.json` a mano, con valores
+  inventados (`abc123xyz`, `123456789012`), y describió el evento a partir de la documentación.
+* **¿Por qué creo que lo propuso?** Sin un despliegue todavía, era la única forma de tener eventos
+  para las pruebas unitarias del adaptador.
+* **¿Estoy de acuerdo?** Solo como punto de partida. El taller pide *investigar* el evento que
+  envía API Gateway, y un evento escrito por la IA no demuestra nada: si el agente se equivocara en
+  la estructura, las pruebas pasarían igual porque usan el mismo supuesto.
+* **Alternativa:** activar `LOG_EVENTS=true` y leer el evento en CloudWatch, o usar la pestaña
+  *Test* de API Gateway, que muestra el body enviado a Lambda.
+* **¿Qué implementé y por qué?** Capturé el evento real con la pestaña *Test* de API Gateway y lo
+  guardé en `events/proxy-get-order-captured.json` (§14), ocultando credenciales temporales y
+  usuario. Al compararlo, la estructura escrita por el agente era correcta en `path`,
+  `httpMethod`, `pathParameters`, `queryStringParameters` y `body`. El evento real agrega campos
+  de `requestContext.identity` que el ejemplo no tenía, y en una prueba de consola el `stage` es
+  `test-invoke-stage`. Mantengo los ejemplos manuales para las pruebas unitarias, pero la evidencia
+  de la Parte V es el evento capturado.
 
 ---
 
@@ -613,12 +676,8 @@ servidor, no en el código de respuesta.
 
 ## 13. Checklist de la demostración
 
-Video (sin audio, 1:58): [`docs/demo.mp4`](docs/demo.mp4).
-
-Se armó el 2026-10-26 a partir de material real. Las partes de `mvn test` y `mvn package` muestran
-la salida de Maven capturada en la máquina local y presentada como terminal. Lo demás son capturas
-del navegador: la consola de Lambda con la invocación directa, la pestaña Test de API Gateway (path → JSON que recibe cada Lambda), las llamadas a la API desplegada
-(arquitectura B) y el diagrama de §10. Cada escena lleva un subtítulo.
+Video de la demostración (2:13): [`docs/demo.mp4`](docs/demo.mp4). Recorre los puntos en este
+orden, con un subtítulo en cada escena:
 
 1. `mvn test`: 47 pruebas, todas en verde.
 2. `mvn package`: mostrar `target/orders-api-1.0.0.jar`.
@@ -626,7 +685,9 @@ del navegador: la consola de Lambda con la invocación directa, la pestaña Test
 4. Llamar a la API desplegada (comandos en [`docs/examples.md`](docs/examples.md)):
    POST exitoso (201 + `Location`), GET exitoso (200), 404 (`ORD-999`), 400 (`quantity: 0`).
 5. DELETE: `DELETE /orders/ORD-42` → 204, otra vez → 404, `GET /orders/ORD-42` → 404.
-6. Mostrar el diagrama de arquitectura (§10).
+6. Error interno inesperado: invocación de `orders-b-proxy` → 500 `INTERNAL_ERROR` (§9).
+7. Del path a la Lambda: pestaña *Test* de API Gateway en A y en B (§14).
+8. Mostrar el diagrama de arquitectura (§10).
 
 ---
 

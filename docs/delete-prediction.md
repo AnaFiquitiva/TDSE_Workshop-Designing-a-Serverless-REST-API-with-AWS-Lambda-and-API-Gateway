@@ -6,9 +6,6 @@ with what the change actually required (see the "Outcome" section, added in a la
 Expected behavior: `DELETE /orders/ORD-42` → `204 No Content` (empty body);
 `DELETE /orders/ORD-999` → `404 Not Found` with the standard error body.
 
-> ✍️ This prediction was drafted together with the AI agent. If my own prediction differed,
-> I note the differences here: *(…)*
-
 | Question | Prediction |
 |---|---|
 | **Which Java classes should change?** | `OrderRepository` gets a `delete(id)` returning whether something was removed, implemented in `InMemoryOrderRepository`. `OrderService` gets `deleteOrder(id)`, which throws `OrderNotFoundException` if nothing was removed. `OrdersApiHandler` gets a `DELETE` case on `/orders/{id}` returning 204, and its `Allow` header becomes `GET, DELETE`. **Not** `Order`, `CreateOrderRequest` or the exceptions, since 404 already exists as `OrderNotFoundException`. |
